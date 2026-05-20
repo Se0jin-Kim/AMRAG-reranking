@@ -10,7 +10,7 @@ AMRAG: image-text cross-modal consistency scoring
 최종 reranking, filtering threshold 적용, query-adaptive weighting, generation logic은 이 모듈에서 수행하지 않음.
 
 
-최종 return: C_cross(d_i) -> dict
+`최종 return: C_cross(d_i) -> dict`
 
 ## Scoring Formula
 
