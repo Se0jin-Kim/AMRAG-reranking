@@ -1,0 +1,25 @@
+# Local AI agent / Codex settings
+AGENTS.md
+Agents.md
+.agents/
+.codex/
+.codex.toml
+.codex.json
+.codexrc
+codex.toml
+codex.json
+.mcp.json
+
+# Python caches and local test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build and packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
