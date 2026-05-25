@@ -48,6 +48,7 @@ class AMRAGPipeline:
         tau: float = 0.5,
         N: int = 5,
         use_adaptive: bool = False,
+        lambda_c: float = 0.5,
     ) -> dict[str, Any]:
         if q_emb is None:
             raise ValueError("q_emb must not be None.")
@@ -68,6 +69,7 @@ class AMRAGPipeline:
             tau=tau,
             N=N,
             use_adaptive=use_adaptive,
+            lambda_c=lambda_c,
             query_text=query_text,
         )
         logger.info("pipeline.run: E_star size after reranking = %d", len(E_star))
