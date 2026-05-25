@@ -12,6 +12,7 @@ def build_score_output(
     c_cross: float,
     c_clip: float,
     c_itm: float,
+    c_entity: float,
     config: CrossModalConsistencyConfig,
     device: str,
     itm_normalization: str,
@@ -21,6 +22,7 @@ def build_score_output(
         c_cross=float(c_cross),
         c_clip=float(c_clip),
         c_itm=float(c_itm),
+        c_entity=float(c_entity),
         metadata={
             "model_names": {
                 "clip": config.clip_model_name,
@@ -33,6 +35,7 @@ def build_score_output(
             },
             "alpha": config.alpha,
             "beta": config.beta,
+            "gamma": config.gamma,
             "w_text_w_image_used": False,
         },
     )

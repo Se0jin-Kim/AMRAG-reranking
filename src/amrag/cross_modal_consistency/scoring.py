@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -22,6 +23,45 @@ from amrag.cross_modal_consistency.types import (
     CrossModalInput,
     MissingModalityError,
 )
+
+
+@functools.lru_cache(maxsize=1)
+def _load_spacy_nlp() -> Any:
+    """Load en_core_web_sm once; return None if spacy or the model is unavailable."""
+    try:
+        import spacy  # type: ignore[import]
+        return spacy.load("en_core_web_sm")
+    except (ImportError, OSError):
+        return None
+
+
+def _extract_entities(text: str | None) -> set[str]:
+    """Return lowercase named-entity strings from text.
+
+    Uses spacy en_core_web_sm when available; falls back to capitalized words.
+    Returns an empty set when text is None or empty.
+    """
+    if not text or not text.strip():
+        return set()
+    nlp = _load_spacy_nlp()
+    if nlp is not None:
+        doc = nlp(text)
+        return {ent.text.lower() for ent in doc.ents}
+    # Fallback: treat capitalized (non-first-position) words as proxy entities
+    tokens = text.split()
+    return {
+        t.strip(".,!?;:'\"").lower()
+        for t in tokens
+        if t and t[0].isupper() and len(t) > 1
+    }
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    """Jaccard similarity: |A ∩ B| / |A ∪ B|. Returns 0.0 when both sets are empty."""
+    union = a | b
+    if not union:
+        return 0.0
+    return len(a & b) / len(union)
 
 
 class CrossModalConsistencyScorer:
@@ -79,13 +119,25 @@ class CrossModalConsistencyScorer:
         self._validate_component_score(c_clip, "c_clip")
         self._validate_component_score(c_itm, "c_itm")
 
-        c_cross = (self.config.alpha * c_clip) + (self.config.beta * c_itm)
+        if scoring_input.query is not None:
+            q_ents = _extract_entities(scoring_input.query)
+            t_ents = _extract_entities(text)
+            c_entity = _jaccard(q_ents, t_ents)
+        else:
+            c_entity = 0.0
+
+        c_cross = (
+            self.config.alpha * c_clip
+            + self.config.beta * c_itm
+            + self.config.gamma * c_entity
+        )
         self._validate_component_score(c_cross, "c_cross")
         return build_score_output(
             doc_id=self._resolve_doc_id(scoring_input.d_i, scoring_input.doc_id),
             c_cross=c_cross,
             c_clip=c_clip,
             c_itm=c_itm,
+            c_entity=c_entity,
             config=self.config,
             device=self.device,
             itm_normalization=itm_normalization,
@@ -160,19 +212,23 @@ class CrossModalConsistencyScorer:
     def _validate_config(self) -> None:
         alpha = self.config.alpha
         beta = self.config.beta
-        if not math.isfinite(alpha) or not math.isfinite(beta):
-            raise ValueError("alpha and beta must be finite numbers.")
-        if alpha < 0.0 or beta < 0.0:
-            raise ValueError("alpha and beta must be non-negative.")
+        gamma = self.config.gamma
+        if not math.isfinite(alpha) or not math.isfinite(beta) or not math.isfinite(gamma):
+            raise ValueError("alpha, beta, and gamma must be finite numbers.")
+        if alpha < 0.0 or beta < 0.0 or gamma < 0.0:
+            raise ValueError("alpha, beta, and gamma must be non-negative.")
         if self.config.itm_matched_index < 0:
             raise ValueError("itm_matched_index must be non-negative.")
         if self.config.validate_alpha_beta and not math.isclose(
-            alpha + beta,
+            alpha + beta + gamma,
             1.0,
             rel_tol=0.0,
             abs_tol=self.config.alpha_beta_tolerance,
         ):
-            raise ValueError("alpha + beta must equal 1.0.")
+            raise ValueError(
+                f"alpha + beta + gamma must equal 1.0, "
+                f"got alpha={alpha}, beta={beta}, gamma={gamma}."
+            )
 
     @staticmethod
     def _validate_image(image: Any) -> None:

@@ -14,8 +14,9 @@ class MissingModalityError(CrossModalConsistencyError):
 
 @dataclass(frozen=True)
 class CrossModalConsistencyConfig:
-    alpha: float = 0.5
-    beta: float = 0.5
+    alpha: float = 0.4
+    beta: float = 0.4
+    gamma: float = 0.2
     validate_alpha_beta: bool = True
     alpha_beta_tolerance: float = 1e-6
     device: str = "auto"
@@ -42,6 +43,7 @@ class CrossModalConsistencyScore:
     c_cross: float
     c_clip: float
     c_itm: float
+    c_entity: float
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -50,5 +52,6 @@ class CrossModalConsistencyScore:
             "c_cross": self.c_cross,
             "c_clip": self.c_clip,
             "c_itm": self.c_itm,
+            "c_entity": self.c_entity,
             "metadata": self.metadata,
         }

@@ -141,63 +141,75 @@ def rerank(
     evidence_list: list[dict[str, Any]],
     scorer: CrossModalConsistencyScorer,
     q_emb: Any,
-    alpha: float = 0.5,
-    beta: float = 0.5,
+    alpha: float = 0.5,        # noqa: ARG001  kept for backward compatibility
+    beta: float = 0.5,         # noqa: ARG001  kept for backward compatibility
     gamma_I: float | None = 0.5,
     gamma_T: float | None = 0.5,
     tau: float = 0.5,
     N: int = 5,
-    use_adaptive: bool = False,
+    use_adaptive: bool = False,  # noqa: ARG001  kept for backward compatibility
+    lambda_c: float = 0.5,
+    query_text: str | None = None,
 ) -> list[dict[str, Any]]:
     """Score, filter, and rerank evidence documents by cross-modal consistency.
 
-    Scoring formula (PDF-aligned):
-        S(Ei, q) = α · R(Ei, q) + β · η(q) · C_clip_norm(Ei)
+    Scoring formula:
+        S_final(q, di) = w_image(q)·S_image(q, di)
+                       + w_text(q)·S_text(q, di)
+                       + λ·C_cross(di)
 
-    η(q) = gamma_I when use_adaptive=True, else 1.0.
+        S_image(q, di) = sim(E_text(q), E_image(image_i)) = dot(q_emb, I_i)
+        S_text(q, di)  = sim(E_text(q), E_text(text_i))  = dot(q_emb, T_i)
+        w_image(q)     = gamma_I
+        w_text(q)      = gamma_T
+        λ              = lambda_c
+        C_cross(di)    = c_cross (CLIP + BLIP ITM blend)
 
     Args:
         evidence_list: Each item must contain keys
             ``doc_id``, ``image``, ``text``, ``I_i``, and ``T_i``.
         scorer: A ready-to-use CrossModalConsistencyScorer instance.
-        q_emb: Query embedding used to compute R_base via compute_R_base().
-        alpha: Weight for R_base in S. Used when use_adaptive=False.
-        beta: Weight for η·C_clip_norm in S. Used when use_adaptive=False.
-        gamma_I: Image weight for compute_R_base() and (when use_adaptive=True)
-                 for compute_eta() and get_adaptive_weights(). Defaults to 0.5.
-        gamma_T: Text weight for compute_R_base() and compute_eta(). Defaults to 0.5.
-        tau: Minimum raw c_cross threshold; items below are discarded before
-             eta scaling so the gate is independent of query type.
+        q_emb: Query embedding used to compute S_image and S_text.
+        alpha: Unused in S formula; kept for backward compatibility.
+        beta: Unused in S formula; kept for backward compatibility.
+        gamma_I: Image modality weight (w_image). Defaults to 0.5.
+        gamma_T: Text modality weight (w_text). Defaults to 0.5.
+        tau: Minimum c_cross threshold; items below are discarded before scoring.
         N: Maximum number of results to return.
-        use_adaptive: When True, derive alpha/beta from gamma_I/gamma_T and
-                      scale C_clip_norm by η(q).
+        use_adaptive: Unused in S formula; kept for backward compatibility.
+        lambda_c: Weight for the C_cross consistency term. Defaults to 0.5.
+        query_text: Original query string forwarded to the scorer so that
+            C_entity (Jaccard entity overlap) can be computed. When None,
+            C_entity is set to 0.0 inside the scorer.
 
     Returns:
         Up to N items sorted by descending S, each containing
         ``doc_id``, ``image``, ``text``, ``R_base``, ``c_cross``, and ``S``.
-        ``c_cross`` is the raw combined score used for tau filtering.
     """
     gamma_I = gamma_I if gamma_I is not None else 0.5
     gamma_T = gamma_T if gamma_T is not None else 0.5
 
-    # Step 1: compute raw scores and R_base for every evidence item
+    # Step 1: compute retrieval scores and consistency scores for every evidence item
     scored: list[dict[str, Any]] = []
     for ev in evidence_list:
         score_result = scorer.score_document(
-            query=None,
+            query=query_text,
             d_i={"id": ev["doc_id"]},
             image_i=ev["image"],
             text_i=ev["text"],
             doc_id=ev["doc_id"],
         )
-        R_base = compute_R_base(q_emb, ev["I_i"], ev["T_i"], gamma_I, gamma_T)
+        S_image = _dot(q_emb, ev["I_i"])  # sim(E_text(q), E_image(image_i))
+        S_text = _dot(q_emb, ev["T_i"])   # sim(E_text(q), E_text(text_i))
+        R_base = gamma_I * S_image + gamma_T * S_text  # kept for output
         scored.append({
             "doc_id": ev["doc_id"],
             "image": ev["image"],
             "text": ev["text"],
             "R_base": R_base,
-            "c_cross": score_result["c_cross"],  # used for tau gate
-            "c_clip": score_result["c_clip"],     # used in S formula
+            "c_cross": score_result["c_cross"],
+            "_S_image": S_image,
+            "_S_text": S_text,
         })
 
     # Step 2: filter by raw c_cross (tau gate is query-type-independent)
@@ -210,22 +222,16 @@ def rerank(
         )
         return []
 
-    # Step 3: resolve alpha / beta
-    alpha, beta = get_adaptive_weights(
-        alpha=alpha,
-        beta=beta,
-        gamma_I=gamma_I,
-        gamma_T=gamma_T,
-        use_adaptive=use_adaptive,
-    )
-
-    # Step 4: apply η to C_clip_norm only (PDF: S = α·R + β·η·C_clip_norm)
-    eta = compute_eta(gamma_I, gamma_T) if use_adaptive else 1.0
+    # Step 3: compute final score S using new formula
     for item in scored:
-        c_clip_scaled = eta * item["c_clip"]
-        item["S"] = compute_reranking_score(item["R_base"], c_clip_scaled, alpha, beta)
-        del item["c_clip"]  # keep output schema clean; c_cross is already stored
+        S_image = item.pop("_S_image")
+        S_text = item.pop("_S_text")
+        item["S"] = (
+            gamma_I * S_image
+            + gamma_T * S_text
+            + lambda_c * item["c_cross"]
+        )
 
-    # Step 5: sort descending by S, return top N
+    # Step 4: sort descending by S, return top N
     scored.sort(key=lambda x: x["S"], reverse=True)
     return scored[:N]

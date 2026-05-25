@@ -18,9 +18,9 @@ from amrag.cross_modal_consistency.model_loader import ModelBundle, load_model_b
 from amrag.cross_modal_consistency.model_loader import resolve_device
 
 
-def make_scorer(clip_score=0.8, itm_score=0.6, alpha=0.5, beta=0.5):
+def make_scorer(clip_score=0.8, itm_score=0.6, alpha=0.5, beta=0.5, gamma=0.0):
     return CrossModalConsistencyScorer(
-        CrossModalConsistencyConfig(alpha=alpha, beta=beta, device="cpu"),
+        CrossModalConsistencyConfig(alpha=alpha, beta=beta, gamma=gamma, device="cpu"),
         clip_scorer=lambda image, text: clip_score,
         itm_scorer=lambda image, text: itm_score,
     )
@@ -150,7 +150,7 @@ def test_alpha_beta_configurability_changes_cross_score():
 
 
 def test_alpha_beta_must_sum_to_one_by_default():
-    with pytest.raises(ValueError, match="alpha \\+ beta must equal 1.0"):
+    with pytest.raises(ValueError, match="alpha \\+ beta \\+ gamma must equal 1\\.0"):
         CrossModalConsistencyScorer(
             CrossModalConsistencyConfig(alpha=0.3, beta=0.3),
             clip_scorer=lambda image, text: 0.5,

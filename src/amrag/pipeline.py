@@ -68,6 +68,7 @@ class AMRAGPipeline:
             tau=tau,
             N=N,
             use_adaptive=use_adaptive,
+            query_text=query_text,
         )
         logger.info("pipeline.run: E_star size after reranking = %d", len(E_star))
 
